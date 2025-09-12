@@ -60,7 +60,7 @@ export default function LandingPage() {
             </div>
             <button 
             onClick={handleLoginClick}
-            className="bg-gray-900 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-gray-800 transition-colors mr-10 cursor-pointer">
+            className="bg-gray-900 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-gray-800 transition-colors mr-0 sm:mr-10 cursor-pointer">
               Log In
             </button>
           </div>
@@ -72,20 +72,20 @@ export default function LandingPage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
             <div data-aos="fade-right" data-aos-delay="200">
-              <h2 className="text-5xl font-bold text-gray-900 leading-tight mb-6">
+              <h2 className="text-2xl sm:text-5xl font-bold text-gray-900 leading-tight mb-6">
                 Innovating<br />
                 Tomorrow&apos;s<br />
                 Business<br />
                 Solutions
               </h2>
-              <p className="text-lg text-gray-600 mb-8">
+              <p className="text-md sm:text-lg text-gray-600 mb-8">
                 TRIVO is your trusted partner for cutting-edge<br />
                 technology and strategic insights. We deliver<br />
                 exceptional results that drive growth and success.
               </p>
             </div>
             <div className="relative" data-aos="fade-left" data-aos-delay="400">
-              <div className="relative w-120 h-100">
+              <div className="relative w-60 h-50 sm:w-120 sm:h-100">
               <Image 
                   src="/building_company.png" 
                   alt="Modern glass office building" 

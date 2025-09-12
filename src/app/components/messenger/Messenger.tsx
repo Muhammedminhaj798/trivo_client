@@ -13,6 +13,8 @@ import { saveAs } from "file-saver";
 import { AudioPlayer } from './audioPlayer';
 
 import dynamic from "next/dynamic";
+import { useSelector } from 'react-redux';
+import { RootState } from '@/app/store';
 
 const PdfModal = dynamic(() => import("./pdfModal"), { ssr: false });
 
@@ -160,26 +162,24 @@ const Messenger: FC<MessengerProps> = ({ role, initialContact }) => {
   const [profileImagePreview, setProfileImagePreview] = useState<string | null>(null);
   const [showContactsTab, setShowContactsTab] = useState(false);
   const [isLoading, setIsLoading] = useState(false); 
-    const [previewUrl, setpreviewUrl] = useState<{
+  const [previewUrl, setpreviewUrl] = useState<{
     url: string;
     name?: string;
     type: "image" | "video";
   } | null>(null);
+  const user = useSelector((state: RootState) => state.user.user)
   
   
   useEffect(() => {
-    const storedToken = localStorage.getItem("token");
-    setToken(storedToken);
-
-    if (storedToken) {
+    if (user) {
       try {
-        const payload = JSON.parse(atob(storedToken.split('.')[1]));
-        setCurrentUserId(payload.id);
+        setToken(user?.token ?? null)
+        setCurrentUserId(user.id);
       } catch (error) {
         console.error("Failed to parse token", error);
       }
     }
-  }, []);
+  }, [user]);
 
 
 
@@ -391,104 +391,98 @@ const Messenger: FC<MessengerProps> = ({ role, initialContact }) => {
       newSocket.emit("joinUser", currentUserId);
     });
 
-    newSocket.on("newMessage", (msg: Message) => {
+    newSocket.on("newMessage", async (msg: Message) => {
       console.log("Received group message:", msg);
       
-      if (selectedGroup && msg.groupId === selectedGroup._id) {
-        setMessages(prev => [...prev, msg]);
-      }
-      
-      setGroups(prev => prev.map(group => {
-        if (group._id === msg.groupId) {
-          const newUnreadCount = msg.senderId._id !== currentUserId ? 
-            (group.unreadCount || 0) + 1 : group.unreadCount;
-          
-          return { 
-            ...group, 
-            updatedAt: new Date().toISOString(),
-            unreadCount: selectedGroup?._id === group._id ? 0 : newUnreadCount
-          };
-        }
-        return group;
-      }));
+  if (selectedGroup && msg.groupId === selectedGroup._id) {
+    setMessages(prev =>
+      prev.some(m => m._id === msg._id) ? prev : [...prev, msg]
+    );
+
+    try {
+      await api.put(`/isRead/group/${msg.groupId}`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setMessages(prev =>
+        prev.map(m =>
+          m._id === msg._id
+            ? { ...m, readBy: [...new Set([...m.readBy, currentUserId])] }
+            : m
+        )
+      );
+    } catch (err) {
+      console.error("Failed to auto mark group message as read", err);
+    }
+  }
     });
     
 
-    newSocket.on("newDirectMessage", (msg: DirectMessage) => {
-      
-      if (selectedContact && 
-          (msg.senderId._id === selectedContact._id || 
-            msg.recieverId === selectedContact._id)) {
-        setDirectMessages(prev => [...prev, msg]);
-      }
-      
-      setPersonalChats(prev => {
-        const senderId = msg.senderId._id;
-        const receiverId = msg.recieverId;
-        
-        console.log("Processing direct message for personal chats:", {
-          senderId,
-          receiverId,
-          currentUserId,
-          messageContent: msg.content
-        });
-        
-        const otherUserId = senderId === currentUserId ? receiverId : senderId;
-        
-        const existingChatIndex = prev.findIndex(chat => chat._id === otherUserId);
-        
-        if (existingChatIndex !== -1) {
-          console.log("Updating existing personal chat");
-          const updatedChats = [...prev];
-          updatedChats[existingChatIndex] = {
-            ...updatedChats[existingChatIndex],
-            lastMessage: msg.content,
-            lastMessageTime: msg.createdAt,
-            unreadCount: msg.senderId._id !== currentUserId ? 
-              (updatedChats[existingChatIndex].unreadCount || 0) + 1 : 
-              updatedChats[existingChatIndex].unreadCount
-          };
-          return updatedChats;
-        } else {
-          console.log("Creating new personal chat");
-          if (senderId !== currentUserId) {
-            const senderContact = contacts.find(c => c._id === senderId);
-            console.log("Sender contact found:", senderContact);
-            
-            if (senderContact) {
-              const newPersonalChat: PersonalChat = {
-                _id: senderId,
-                name: senderContact.name,
-                employeeCode: senderContact.employeeCode,
-                email: senderContact.email,
-                lastMessage: msg.content,
-                lastMessageTime: msg.createdAt,
-                unreadCount: 1,
-                type: 'personal',
-                profileImage: senderContact.profileImage
-              };
-              console.log("Adding new personal chat:", newPersonalChat);
-              return [...prev, newPersonalChat];
-            } else {
-              console.log("Sender not found in contacts, creating basic contact");
-              const newPersonalChat: PersonalChat = {
-                _id: senderId,
-                name: msg.senderId.name,
-                employeeCode: msg.senderId.employeeCode,
-                email: msg.senderId.email,
-                lastMessage: msg.content,
-                lastMessageTime: msg.createdAt,
-                unreadCount: 1,
-                type: 'personal',
-                profileImage: undefined
-              };
-              return [...prev, newPersonalChat];
-            }
-          }
-          return prev;
-        }
+    newSocket.on("newDirectMessage", async (msg: DirectMessage) => {
+  const isCurrentChat =
+    selectedContact &&
+    (msg.senderId._id === selectedContact._id ||
+      msg.recieverId === selectedContact._id);
+
+  if (isCurrentChat) {
+    setDirectMessages(prev =>
+      prev.some(m => m._id === msg._id) ? prev : [...prev, msg]
+    );
+    try {
+      await api.put(`/isRead/personal/${msg.senderId._id}`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
       });
-    });
+      setDirectMessages(prev =>
+        prev.map(m =>
+          m._id === msg._id
+            ? { ...m, readBy: [...new Set([...(m.readBy || []), currentUserId])] }
+            : m
+        )
+      );
+    } catch (err) {
+      console.error("Failed to auto mark direct message as read:", err);
+    }
+  }
+
+  setPersonalChats(prev => {
+    const senderId = msg.senderId._id;
+    const receiverId = msg.recieverId;
+    const otherUserId = senderId === currentUserId ? receiverId : senderId;
+
+    const existingChatIndex = prev.findIndex(chat => chat._id === otherUserId);
+
+    if (existingChatIndex !== -1) {
+      const updatedChats = [...prev];
+      updatedChats[existingChatIndex] = {
+        ...updatedChats[existingChatIndex],
+        lastMessage: msg.content || msg.file?.name || "File",
+        lastMessageTime: msg.createdAt,
+        unreadCount:
+          msg.senderId._id !== currentUserId && !isCurrentChat
+            ? (updatedChats[existingChatIndex].unreadCount || 0) + 1
+            : 0,
+      };
+      return updatedChats;
+    } else {
+      if (senderId !== currentUserId) {
+        const senderContact = contacts.find(c => c._id === senderId);
+        const newPersonalChat: PersonalChat = {
+          _id: senderId,
+          name: senderContact?.name || msg.senderId.name,
+          employeeCode: senderContact?.employeeCode || msg.senderId.employeeCode,
+          email: senderContact?.email || msg.senderId.email,
+          profileImage: senderContact?.profileImage || msg.senderId.profileImage,
+          lastMessage: msg.content || msg.file?.name || "File",
+          lastMessageTime: msg.createdAt,
+          unreadCount: isCurrentChat ? 0 : 1,
+          type: "personal",
+        };
+        return [...prev, newPersonalChat];
+      }
+      return prev;
+    }
+  });
+});
+
 
     newSocket.on("disconnect", () => {
       console.log("Socket disconnected");
@@ -813,7 +807,12 @@ const Messenger: FC<MessengerProps> = ({ role, initialContact }) => {
         );
 
         const newMessage = res.data;
-        setMessages(prev => [...prev, newMessage]);
+        setMessages(prev => {
+          if (prev.some(m => m._id === newMessage._id)) {
+            return prev; 
+          }
+          return [...prev, newMessage];
+        });
         
         console.log("Sending group message via socket");
         socket?.emit("sendMessage", {
@@ -832,7 +831,12 @@ const Messenger: FC<MessengerProps> = ({ role, initialContact }) => {
         const newMessage = res.data;
         console.log("Direct message sent, response:", newMessage);
         
-        setDirectMessages(prev => [...prev, newMessage]);
+        setDirectMessages(prev => {
+          if (prev.some(m => m._id === newMessage._id)) {
+            return prev;
+          }
+          return [...prev, newMessage];
+        });
         
         console.log("Emitting sendDirectMessage via socket");
         socket?.emit("sendDirectMessage", {
@@ -1122,7 +1126,7 @@ const Messenger: FC<MessengerProps> = ({ role, initialContact }) => {
 
                     return (
                       <div
-                        key={message._id}
+                        key={`${message._id}-${message.createdAt}`}
                         className={`flex flex-col ${isCurrentUser ? "items-end" : "items-start"}`}
                       >
                         {showLabel && (
